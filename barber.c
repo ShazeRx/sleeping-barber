@@ -14,10 +14,30 @@ sem_t barber_ready;
 sem_t customer_ready;
 sem_t changeSeats;
 int available_seats;
-int clients_left = 0;
+int clients_left_count = 0;
 int service_finished = 0;
 int current_client;
+int debug = 0;
+
+typedef struct Queue {
+    int id;
+    struct Queue *next;
+} Position;
+
+
+Position *barber_queue = NULL;
+Position *clients_left = NULL;
+
 int main(int argc, char *argv[]) {
+
+    if (argc != 1) {
+        if ((strncmp(argv[1], "-debug", 6) == 0)) {
+            debug = 1;
+        }
+    }
+
+    srand(time(NULL));
+
     pthread_t barber_thread;
 
     pthread_t customer_thread;
@@ -49,6 +69,7 @@ int main(int argc, char *argv[]) {
 
     pthread_join(barber_thread, NULL);
 }
+
 void *barber_func(void *junk) {
     int clients_serviced = 0;
     while (!service_finished) {
@@ -72,13 +93,54 @@ void *barber_func(void *junk) {
         pthread_mutex_unlock(&srvCust);
         printf("Finished work with client: %d\n", current_client);
         clients_serviced++;
-        if (clients_serviced == (numCustomers - clients_left)) {
+        if (clients_serviced == (numCustomers - clients_left_count)) {
             service_finished = 1;
         }
     }
     printf("Barber finished work, going home\n");
     pthread_exit(NULL);
 }
+
+void add_client_to_queue(Position **start, int id) {
+    Position *new = malloc(sizeof(Position));
+    new->id = id;
+    new->next = NULL;
+    if (*start == NULL) {
+        *start = new;
+    } else {
+        Position *position_iterator = *start;
+        while (position_iterator->next != NULL) {
+            position_iterator = position_iterator->next;
+        }
+        position_iterator->next = new;
+    }
+}
+
+void print_queue(Position *first) {
+    Position *iterator = NULL;
+    if (first == NULL) {
+        return;
+    } else {
+        iterator = first;
+        while (iterator != NULL) {
+            printf("%d ", iterator->id);
+            iterator = iterator->next;
+        }
+    }
+}
+
+void print_info() {
+    printf("2: Res:%d WRomm: %d/%d [in: %d]\n", clients_left_count, available_seats, numChairs, current_client);
+    if (debug) {
+        printf("In Queue:");
+        print_queue(barber_queue);
+        printf("\n");
+        printf("Left: ");
+        print_queue(clients_left);
+        printf("\n");
+    }
+}
+
 void *client_func(void *number) {
     int id = *(int *) number;
     sem_wait(&changeSeats);
@@ -87,22 +149,31 @@ void *client_func(void *number) {
 
         sem_post(&customer_ready);
 
+        add_client_to_queue(&barber_queue, id);
+
         sem_post(&changeSeats);
 
-        printf("2: Res:%d WRomm: %d/%d [in: %d]\n", clients_left, available_seats, numChairs, current_client);
+        print_info();
 
         sem_wait(&barber_ready);
 
         current_client = id;
 
-        printf("3: Res:%d WRomm: %d/%d [in: %d]\n", clients_left, available_seats, numChairs, current_client);
+        print_info();
     } else {
+        add_client_to_queue(&clients_left, id);
+
+        printf("Client with id: %d left because of no available seats!\n", id);
+
         sem_post(&changeSeats);
-        clients_left++;
-        printf("4: Res:%d WRomm: %d/%d [in: %d]\n", clients_left, available_seats, numChairs, current_client);
+
+        clients_left_count++;
+
+        print_info();
     }
     pthread_exit(NULL);
 }
+
 void *create_customers(void *junk) {
     int thread_init_numbers[numCustomers];
     for (int i = 1; i <= numCustomers; i++) {
@@ -113,6 +184,7 @@ void *create_customers(void *junk) {
             printf("Failed to create a customer thread\n");
             exit(status);
         }
-        usleep(2000);
+        int sleep_random_time = rand() % 5;
+        sleep(sleep_random_time);
     }
 }
